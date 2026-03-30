@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Webcam from "react-webcam";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { 
   Camera, 
   CameraOff, 
@@ -20,115 +21,138 @@ import {
   ArrowLeft,
   ArrowRight,
   Code,
-  MessageSquare
+  MessageSquare,
+  Brain,
+  Clock,
+  Target,
+  Zap,
+  Loader2,
+  Send
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import CodeEditor from "@/components/CodeEditor";
+import { 
+  generateAdaptiveQuestion, 
+  evaluateResponse,
+  generateFollowUp,
+  Question, 
+  EvaluationResult,
+  InterviewRole,
+  INTERVIEW_ROLES
+} from "@/lib/aiService";
+import { gestureAnalyzer, GestureAnalysisResult } from "@/lib/gestureAnalysis";
 
-interface GestureStatus {
-  attention: 'good' | 'warning' | 'poor';
-  eyeContact: 'good' | 'warning' | 'poor';
-  posture: 'good' | 'warning' | 'poor';
+interface UserResponse {
+  question: string;
+  response: string;
+  code?: string;
+  evaluation?: EvaluationResult;
 }
 
-interface Question {
-  id: number;
-  text: string;
-  type: 'behavioral' | 'programming';
-  programmingPrompt?: string;
-}
-
-const mockQuestions: Question[] = [
-  {
-    id: 1,
-    text: "Tell me about yourself and your background in software development.",
-    type: 'behavioral'
-  },
-  {
-    id: 2,
-    text: "What is your experience with React and modern frontend frameworks?",
-    type: 'behavioral'
-  },
-  {
-    id: 3,
-    text: "Write a function to find the two numbers in an array that add up to a target sum.",
-    type: 'programming',
-    programmingPrompt: `Problem: Two Sum
-
-Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
-
-You may assume that each input would have exactly one solution, and you may not use the same element twice.
-
-Example:
-Input: nums = [2,7,11,15], target = 9
-Output: [0,1]
-Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
-
-Constraints:
-- 2 <= nums.length <= 104
-- -109 <= nums[i] <= 109
-- -109 <= target <= 109
-- Only one valid answer exists.`
-  },
-  {
-    id: 4,
-    text: "How do you handle state management in large applications?",
-    type: 'behavioral'
-  },
-  {
-    id: 5,
-    text: "Implement a function to reverse a linked list.",
-    type: 'programming',
-    programmingPrompt: `Problem: Reverse Linked List
-
-Given the head of a singly linked list, reverse the list, and return the reversed list.
-
-Example:
-Input: head = [1,2,3,4,5]
-Output: [5,4,3,2,1]
-
-Definition for singly-linked list:
-class ListNode {
-    int val;
-    ListNode next;
-    ListNode() {}
-    ListNode(int val) { this.val = val; }
-    ListNode(int val, ListNode next) { this.val = val; this.next = next; }
-}
-
-Constraints:
-- The number of nodes in the list is the range [0, 5000].
-- -5000 <= Node.val <= 5000`
-  },
-  {
-    id: 6,
-    text: "What are your strengths and weaknesses as a developer?",
-    type: 'behavioral'
-  }
-];
+const MAX_QUESTIONS = 10;
 
 export const Interview = () => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
   const [isInterviewStarted, setIsInterviewStarted] = useState(false);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [userResponses, setUserResponses] = useState<UserResponse[]>([]);
+  const [currentResponse, setCurrentResponse] = useState("");
+  const [currentCode, setCurrentCode] = useState("");
+  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [showEvaluation, setShowEvaluation] = useState(false);
+  
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
-  const [gestureStatus, setGestureStatus] = useState<GestureStatus>({
+  const [gestureStatus, setGestureStatus] = useState<GestureAnalysisResult>({
     attention: 'good',
     eyeContact: 'good',
-    posture: 'good'
+    posture: 'good',
+    faceDetected: true,
+    confidence: 0,
+    details: []
   });
   const [interviewProgress, setInterviewProgress] = useState(0);
-  const [activeTab, setActiveTab] = useState<'video' | 'code'>('video');
-  const [userCode, setUserCode] = useState('');
+  const [activeTab, setActiveTab] = useState<'video' | 'code' | 'response'>('video');
+  
+  const [selectedRole, setSelectedRole] = useState<InterviewRole | null>(null);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [gestureError, setGestureError] = useState<string | null>(null);
   
   const webcamRef = useRef<Webcam>(null);
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const gestureIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Tab focus monitoring
+  useEffect(() => {
+    const stored = sessionStorage.getItem('interviewConfig');
+    if (stored) {
+      try {
+        const config = JSON.parse(stored);
+        setSelectedRole(config.role);
+      } catch (e) {
+        console.error('Error parsing interview config:', e);
+      }
+    }
+  }, []);
+
+  const initGestureAnalysis = useCallback(async () => {
+    try {
+      await gestureAnalyzer.loadModels();
+      setModelsLoaded(true);
+      toast({
+        title: "Gesture Analysis Ready",
+        description: "AI-powered gesture detection is now active.",
+      });
+    } catch (error) {
+      console.error('Failed to load gesture models:', error);
+      setGestureError("Gesture analysis unavailable. Using basic detection.");
+      setModelsLoaded(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (isInterviewStarted && cameraEnabled && modelsLoaded) {
+      const setupGestureAnalysis = () => {
+        // `react-webcam` exposes the underlying <video> element on the ref.
+        // Using this is more reliable than passing a `videoRef` prop.
+        const videoEl = (webcamRef.current as unknown as { video?: HTMLVideoElement | null })?.video ?? null;
+
+        if (videoEl) {
+          gestureAnalyzer.setVideo(videoEl);
+          
+          gestureIntervalRef.current = setInterval(async () => {
+            const currentVideoEl = (webcamRef.current as unknown as { video?: HTMLVideoElement | null })?.video ?? null;
+            if (currentVideoEl && currentVideoEl.readyState === 4) {
+              const result = await gestureAnalyzer.analyzeFrame();
+              setGestureStatus(result);
+            }
+          }, 800);
+
+          return true;
+        }
+        return false;
+      };
+
+      if (!setupGestureAnalysis()) {
+        const retryTimeout = setTimeout(() => {
+          setupGestureAnalysis();
+        }, 1000);
+        return () => clearTimeout(retryTimeout);
+      }
+
+      return () => {
+        if (gestureIntervalRef.current) {
+          clearInterval(gestureIntervalRef.current);
+        }
+      };
+    }
+  }, [isInterviewStarted, cameraEnabled, modelsLoaded]);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden && isInterviewStarted) {
@@ -162,23 +186,6 @@ export const Interview = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isInterviewStarted, tabSwitchCount, navigate, toast]);
 
-  // Mock gesture analysis
-  useEffect(() => {
-    if (!isInterviewStarted) return;
-
-    const interval = setInterval(() => {
-      // Simulate random gesture analysis results
-      const statuses: Array<'good' | 'warning' | 'poor'> = ['good', 'warning', 'poor'];
-      setGestureStatus({
-        attention: statuses[Math.floor(Math.random() * 3)],
-        eyeContact: statuses[Math.floor(Math.random() * 3)],
-        posture: statuses[Math.floor(Math.random() * 3)]
-      });
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [isInterviewStarted]);
-
   const requestPermissions = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -187,7 +194,10 @@ export const Interview = () => {
       });
       setCameraEnabled(true);
       setMicEnabled(true);
-      stream.getTracks().forEach(track => track.stop()); // Stop the test stream
+      stream.getTracks().forEach(track => track.stop());
+      
+      await initGestureAnalysis();
+      
       toast({
         title: "Permissions Granted",
         description: "Camera and microphone access enabled.",
@@ -201,7 +211,189 @@ export const Interview = () => {
     }
   };
 
-  const startInterview = () => {
+  const generateNextQuestion = async () => {
+    if (!selectedRole) return;
+
+    setIsLoadingQuestion(true);
+    try {
+      const previousQuestions = questions;
+      const responseHistory = userResponses.map(r => ({
+        question: r.question,
+        response: r.response
+      }));
+
+      const questionNum = questions.length;
+      const newQuestion = await generateAdaptiveQuestion(
+        selectedRole,
+        previousQuestions,
+        responseHistory,
+        questionNum
+      );
+
+      setQuestions(prev => {
+        const exists = prev.some(q => q.id === newQuestion.id);
+        if (exists) {
+          return [...prev, { ...newQuestion, id: `q-${Date.now()}` }];
+        }
+        return [...prev, newQuestion];
+      });
+      setCurrentResponse("");
+      setCurrentCode("");
+    } catch (error) {
+      console.error('Error generating question:', error);
+      toast({
+        title: "Error",
+        description: "Failed to generate question. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoadingQuestion(false);
+    }
+  };
+
+  const submitResponse = async () => {
+    if (!currentResponse.trim() && !currentCode.trim()) {
+      toast({
+        title: "Response Required",
+        description: "Please provide an answer or code before submitting.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsEvaluating(true);
+    const currentQ = questions[currentQuestionIndex];
+
+    try {
+      const evaluation = await evaluateResponse(
+        currentQ,
+        currentResponse,
+        currentCode,
+        selectedRole || undefined
+      );
+
+      const newResponse: UserResponse = {
+        question: currentQ.text,
+        response: currentResponse,
+        code: currentCode,
+        evaluation
+      };
+
+      const updatedResponses = [...userResponses, newResponse];
+      setUserResponses(updatedResponses);
+      setShowEvaluation(true);
+      
+      toast({
+        title: "Response Evaluated",
+        description: `Overall Score: ${evaluation.overallScore}%`,
+      });
+    } catch (error) {
+      console.error('Error evaluating response:', error);
+      toast({
+        title: "Evaluation Error",
+        description: "Could not evaluate your response.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const skipQuestion = () => {
+    const currentQ = questions[currentQuestionIndex];
+    if (!currentQ) return;
+
+    const defaultEvaluation: EvaluationResult = {
+      skillScore: 0,
+      communicationScore: 0,
+      depthScore: 0,
+      redFlags: ['Question not answered'],
+      strengths: [],
+      weaknesses: ['Did not provide an answer'],
+      missedConcepts: ['Question was skipped'],
+      suggestions: ['Try to answer all questions for better evaluation'],
+      overallScore: 0
+    };
+
+    const newResponse: UserResponse = {
+      question: currentQ.text,
+      response: '',
+      code: '',
+      evaluation: defaultEvaluation
+    };
+
+    setUserResponses(prev => [...prev, newResponse]);
+    
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+      setInterviewProgress(((currentQuestionIndex + 2) / MAX_QUESTIONS) * 100);
+      setShowEvaluation(false);
+    } else if (currentQuestionIndex < MAX_QUESTIONS - 1) {
+      generateNextQuestion().then(() => {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+        setInterviewProgress(((currentQuestionIndex + 2) / MAX_QUESTIONS) * 100);
+        setShowEvaluation(false);
+      });
+    } else {
+      finishInterview();
+    }
+  };
+
+  const finishInterview = () => {
+    const answeredCount = userResponses.filter(r => r.response && r.response.trim()).length;
+    const totalQuestions = questions.length;
+    
+    let totalScore = 0;
+    let scoreCount = 0;
+    
+    userResponses.forEach(r => {
+      if (r.evaluation) {
+        totalScore += r.evaluation.overallScore;
+        scoreCount++;
+      }
+    });
+
+    if (answeredCount === 0 && scoreCount === 0) {
+      totalScore = 15;
+      scoreCount = 1;
+    }
+
+    const finalScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : totalScore;
+
+    sessionStorage.setItem('interviewResult', JSON.stringify({
+      totalQuestions,
+      answeredQuestions: answeredCount,
+      skippedQuestions: totalQuestions - answeredCount,
+      overallScore: finalScore,
+      responses: userResponses,
+      role: selectedRole?.name
+    }));
+
+    toast({
+      title: "Interview Completed",
+      description: `Final Score: ${finalScore}% - ${answeredCount}/${totalQuestions} questions answered`,
+    });
+    setTimeout(() => navigate("/dashboard"), 2500);
+  };
+
+  const nextQuestion = async () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+      setInterviewProgress(((currentQuestionIndex + 2) / MAX_QUESTIONS) * 100);
+      setShowEvaluation(false);
+      setCurrentResponse("");
+      setCurrentCode("");
+    } else if (currentQuestionIndex < MAX_QUESTIONS - 1) {
+      await generateNextQuestion();
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+      setInterviewProgress(((currentQuestionIndex + 2) / MAX_QUESTIONS) * 100);
+      setShowEvaluation(false);
+    } else {
+      finishInterview();
+    }
+  };
+
+  const startInterview = async () => {
     if (!cameraEnabled || !micEnabled) {
       toast({
         title: "Permissions Required",
@@ -210,26 +402,16 @@ export const Interview = () => {
       });
       return;
     }
+
     setIsInterviewStarted(true);
     setIsRecording(true);
+    
+    await generateNextQuestion();
+    
     toast({
       title: "Interview Started",
-      description: "Good luck! Remember to maintain eye contact and stay focused.",
+      description: `Good luck! You'll be asked ${MAX_QUESTIONS} questions adapted to your responses.`,
     });
-  };
-
-  const nextQuestion = () => {
-    if (currentQuestion < mockQuestions.length - 1) {
-      setCurrentQuestion(currentQuestion + 1);
-      setInterviewProgress(((currentQuestion + 2) / mockQuestions.length) * 100);
-    } else {
-      // Interview completed
-      toast({
-        title: "Interview Completed",
-        description: "Great job! Generating your report...",
-      });
-      setTimeout(() => navigate("/dashboard"), 2000);
-    }
   };
 
   const getGestureIcon = (status: string) => {
@@ -250,6 +432,9 @@ export const Interview = () => {
     }
   };
 
+  const currentQuestion = questions[currentQuestionIndex];
+  const currentEvaluation = userResponses[currentQuestionIndex]?.evaluation;
+
   if (!isInterviewStarted) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -266,9 +451,14 @@ export const Interview = () => {
                 transition={{ delay: 0.2 }}
               >
                 <h1 className="text-3xl font-bold mb-4">AI Interview Setup</h1>
+                {selectedRole && (
+                  <div className="mb-4 p-3 bg-primary/10 rounded-lg inline-block">
+                    <Badge>Interviewing for: {selectedRole.name}</Badge>
+                  </div>
+                )}
                 <p className="text-muted-foreground mb-8">
-                  Let's set up your interview environment. We'll need access to your camera and microphone
-                  for gesture analysis and recording your responses.
+                  We'll need access to your camera and microphone for proctoring and gesture analysis.
+                  The AI will adapt questions based on your responses.
                 </p>
               </motion.div>
 
@@ -317,7 +507,7 @@ export const Interview = () => {
                   <Alert>
                     <CheckCircle className="h-4 w-4" />
                     <AlertDescription>
-                      All permissions granted! You're ready to start the interview.
+                      All permissions granted! You're ready to start the adaptive AI interview.
                     </AlertDescription>
                   </Alert>
                 )}
@@ -335,7 +525,8 @@ export const Interview = () => {
                   size="lg"
                   className="w-full bg-gradient-primary text-primary-foreground hover:shadow-glow"
                 >
-                  Start Interview
+                  <Zap className="h-4 w-4 mr-2" />
+                  Start Adaptive AI Interview
                 </Button>
                 
                 <Button 
@@ -356,7 +547,6 @@ export const Interview = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b border-border bg-card p-4">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -364,8 +554,11 @@ export const Interview = () => {
               {isRecording ? "Recording" : "Paused"}
             </Badge>
             <div className="text-sm text-muted-foreground">
-              Question {currentQuestion + 1} of {mockQuestions.length}
+              Question {currentQuestionIndex + 1} of {MAX_QUESTIONS}
             </div>
+            {selectedRole && (
+              <Badge variant="outline">{selectedRole.name}</Badge>
+            )}
           </div>
           
           <div className="flex items-center space-x-4">
@@ -381,7 +574,6 @@ export const Interview = () => {
 
       <div className="container mx-auto p-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Camera Feed */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -390,77 +582,154 @@ export const Interview = () => {
             <Card className="h-fit">
               <CardContent className="p-6">
                 <div className="aspect-video bg-secondary rounded-lg overflow-hidden relative">
-                  <Webcam
-                    ref={webcamRef}
-                    audio={false}
-                    className="w-full h-full object-cover"
-                    mirrored
-                  />
-                  <div className="absolute top-4 left-4">
-                    <Badge variant="destructive" className="animate-pulse">
-                      ● LIVE
-                    </Badge>
-                  </div>
+                  {cameraEnabled ? (
+                    <>
+                      <Webcam
+                        ref={webcamRef}
+                        audio={false}
+                        className="w-full h-full object-cover"
+                        mirrored
+                      />
+                      <div className="absolute top-4 left-4">
+                        <Badge variant="destructive" className="animate-pulse">
+                          ● LIVE
+                        </Badge>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <CameraOff className="h-12 w-12 text-muted-foreground" />
+                    </div>
+                  )}
                 </div>
                 
                 <div className="mt-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold">Current Question:</h3>
-                    {mockQuestions[currentQuestion].type === 'programming' && (
+                    {currentQuestion && (
                       <Badge variant="secondary" className="flex items-center space-x-1">
-                        <Code className="h-3 w-3" />
-                        <span>Programming</span>
+                        {currentQuestion.type === 'programming' && <Code className="h-3 w-3" />}
+                        {currentQuestion.type === 'technical' && <Brain className="h-3 w-3" />}
+                        {currentQuestion.type === 'behavioral' && <MessageSquare className="h-3 w-3" />}
+                        <span>{currentQuestion.category}</span>
                       </Badge>
                     )}
                   </div>
                   
-                  {mockQuestions[currentQuestion].type === 'programming' ? (
-                    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'video' | 'code')}>
-                      <TabsList className="grid w-full grid-cols-2">
+                  {isLoadingQuestion ? (
+                    <div className="flex items-center justify-center p-8">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <span className="ml-3 text-muted-foreground">Generating adaptive question...</span>
+                    </div>
+                  ) : currentQuestion ? (
+                    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'video' | 'code' | 'response')}>
+                      <TabsList className="grid w-full grid-cols-3">
                         <TabsTrigger value="video" className="flex items-center space-x-2">
                           <MessageSquare className="h-4 w-4" />
-                          <span>Discussion</span>
+                          <span>Question</span>
                         </TabsTrigger>
-                        <TabsTrigger value="code" className="flex items-center space-x-2">
-                          <Code className="h-4 w-4" />
-                          <span>Code</span>
+                        {currentQuestion.type === 'programming' && (
+                          <TabsTrigger value="code" className="flex items-center space-x-2">
+                            <Code className="h-4 w-4" />
+                            <span>Code</span>
+                          </TabsTrigger>
+                        )}
+                        <TabsTrigger value="response" className="flex items-center space-x-2">
+                          <Send className="h-4 w-4" />
+                          <span>Answer</span>
                         </TabsTrigger>
                       </TabsList>
                       
                       <TabsContent value="video" className="mt-4">
                         <p className="text-foreground bg-muted p-4 rounded-lg">
-                          {mockQuestions[currentQuestion].text}
+                          {currentQuestion.text}
                         </p>
-                        <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
-                          <p className="text-sm text-blue-700 dark:text-blue-300">
-                            💡 <strong>Tip:</strong> First, discuss your approach verbally. Explain your thought process, then switch to the Code tab to implement your solution.
-                          </p>
-                        </div>
+                        {currentQuestion.programmingPrompt && (
+                          <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                            <p className="text-sm text-blue-700 dark:text-blue-300 whitespace-pre-line">
+                              {currentQuestion.programmingPrompt}
+                            </p>
+                          </div>
+                        )}
                       </TabsContent>
                       
-                      <TabsContent value="code" className="mt-4">
-                        <div className="max-h-[600px] overflow-y-auto">
-                          <CodeEditor 
-                            question={mockQuestions[currentQuestion].programmingPrompt}
-                            onCodeChange={setUserCode}
-                          />
-                        </div>
+                      {currentQuestion.type === 'programming' && (
+                        <TabsContent value="code" className="mt-4">
+                          <div className="max-h-[600px] overflow-y-auto">
+                            <CodeEditor 
+                              question={currentQuestion.programmingPrompt}
+                              onCodeChange={setCurrentCode}
+                            />
+                          </div>
+                        </TabsContent>
+                      )}
+                      
+                      <TabsContent value="response" className="mt-4 space-y-4">
+                        <Textarea
+                          placeholder="Type your answer here..."
+                          value={currentResponse}
+                          onChange={(e) => setCurrentResponse(e.target.value)}
+                          rows={6}
+                          disabled={showEvaluation}
+                        />
+                        
+                        {!showEvaluation ? (
+                          <Button 
+                            onClick={submitResponse}
+                            disabled={isEvaluating || (!currentResponse.trim() && !currentCode.trim())}
+                            className="w-full"
+                          >
+                            {isEvaluating ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Evaluating...
+                              </>
+                            ) : (
+                              <>
+                                <Send className="h-4 w-4 mr-2" />
+                                Submit Answer
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <div className="p-4 bg-muted rounded-lg">
+                            <p className="text-sm text-muted-foreground">
+                              Answer submitted. Click "Next Question" to continue.
+                            </p>
+                          </div>
+                        )}
                       </TabsContent>
                     </Tabs>
                   ) : (
-                    <p className="text-foreground bg-muted p-4 rounded-lg">
-                      {mockQuestions[currentQuestion].text}
-                    </p>
+                    <p className="text-muted-foreground">No question loaded</p>
                   )}
                 </div>
 
                 <div className="flex justify-between mt-6">
-                  <Button variant="outline" disabled={currentQuestion === 0}>
+                  <Button 
+                    variant="outline" 
+                    disabled={currentQuestionIndex === 0}
+                    onClick={() => {
+                      setCurrentQuestionIndex(currentQuestionIndex - 1);
+                      setShowEvaluation(false);
+                    }}
+                  >
                     <ArrowLeft className="h-4 w-4 mr-2" />
                     Previous
                   </Button>
-                  <Button onClick={nextQuestion} className="bg-gradient-primary text-primary-foreground">
-                    {currentQuestion === mockQuestions.length - 1 ? 'Finish Interview' : 'Next Question'}
+                  <Button 
+                    variant="outline"
+                    onClick={skipQuestion}
+                    disabled={!currentQuestion}
+                  >
+                    Skip
+                  </Button>
+                  <Button 
+                    onClick={nextQuestion}
+                    className="bg-gradient-primary text-primary-foreground"
+                    disabled={currentQuestionIndex === 0 && !currentQuestion}
+                  >
+                    {currentQuestionIndex >= MAX_QUESTIONS - 1 ? 'Finish Interview' : 'Next Question'}
                     <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </div>
@@ -468,7 +737,6 @@ export const Interview = () => {
             </Card>
           </motion.div>
 
-          {/* Gesture Analysis */}
           <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -511,9 +779,85 @@ export const Interview = () => {
                       </span>
                     </div>
                   </div>
+
+                  {gestureStatus.details.length > 0 && (
+                    <div className="mt-4 pt-4 border-t text-xs text-muted-foreground">
+                      {gestureStatus.details.slice(0, 2).map((detail, i) => (
+                        <p key={i} className="mb-1">{detail}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
+
+            {showEvaluation && currentEvaluation && (
+              <Card>
+                <CardContent className="p-6">
+                  <h3 className="font-semibold mb-4 flex items-center space-x-2">
+                    <Target className="h-5 w-5" />
+                    <span>Evaluation</span>
+                  </h3>
+                  
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">Skill Score</span>
+                      <span className="font-medium">{currentEvaluation.skillScore}%</span>
+                    </div>
+                    <Progress value={currentEvaluation.skillScore} />
+                    
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">Communication</span>
+                      <span className="font-medium">{currentEvaluation.communicationScore}%</span>
+                    </div>
+                    <Progress value={currentEvaluation.communicationScore} />
+                    
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm">Depth</span>
+                      <span className="font-medium">{currentEvaluation.depthScore}%</span>
+                    </div>
+                    <Progress value={currentEvaluation.depthScore} />
+                    
+                    <div className="pt-3 border-t">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-medium">Overall</span>
+                        <Badge variant={currentEvaluation.overallScore >= 70 ? "default" : "destructive"}>
+                          {currentEvaluation.overallScore}%
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {currentEvaluation.strengths.length > 0 && (
+                      <div className="mt-3 pt-3 border-t">
+                        <p className="text-sm font-medium mb-1">Strengths:</p>
+                        <ul className="text-xs text-muted-foreground space-y-1">
+                          {currentEvaluation.strengths.map((s, i) => (
+                            <li key={i} className="flex items-center">
+                              <CheckCircle className="h-3 w-3 mr-1 text-success" />
+                              {s}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {currentEvaluation.suggestions.length > 0 && (
+                      <div className="mt-3 pt-3 border-t">
+                        <p className="text-sm font-medium mb-1">Suggestions:</p>
+                        <ul className="text-xs text-muted-foreground space-y-1">
+                          {currentEvaluation.suggestions.map((s, i) => (
+                            <li key={i} className="flex items-center">
+                              <Zap className="h-3 w-3 mr-1 text-warning" />
+                              {s}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardContent className="p-6">

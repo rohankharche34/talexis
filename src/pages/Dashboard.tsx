@@ -20,7 +20,9 @@ import {
   Settings,
   HelpCircle,
   Shield,
-  Mail
+  Mail,
+  GitBranch,
+  Play
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -123,11 +125,15 @@ export const Dashboard = () => {
   };
 
   const handleStartInterview = () => {
-    navigate("/interview");
+    navigate("/interview-setup");
   };
 
   const handleATSCheck = () => {
     navigate("/ats-checker");
+  };
+
+  const handlePipelineBuilder = () => {
+    navigate("/pipeline-builder");
   };
 
   return (
@@ -334,6 +340,20 @@ export const Dashboard = () => {
                   <div>
                     <h3 className="font-semibold text-lg">ATS Score Checker</h3>
                     <p className="text-muted-foreground">Optimize your resume</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="cursor-pointer transition-all duration-300 hover:shadow-primary hover:scale-105">
+              <CardContent className="p-6" onClick={handlePipelineBuilder}>
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 bg-gradient-primary rounded-lg flex items-center justify-center">
+                    <GitBranch className="h-6 w-6 text-primary-foreground" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-lg">Pipeline Builder</h3>
+                    <p className="text-muted-foreground">Create custom interview flows</p>
                   </div>
                 </div>
               </CardContent>

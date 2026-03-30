@@ -8,7 +8,9 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import Interview from "./pages/Interview";
+import InterviewSetup from "./pages/InterviewSetup";
 import ATSChecker from "./pages/ATSChecker";
+import PipelineBuilder from "./pages/PipelineBuilder";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,8 +26,10 @@ const App = () => (
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/interview-setup" element={<InterviewSetup />} />
           <Route path="/interview" element={<Interview />} />
           <Route path="/ats-checker" element={<ATSChecker />} />
+          <Route path="/pipeline-builder" element={<PipelineBuilder />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
