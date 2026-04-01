@@ -27,10 +27,14 @@ import {
   Target,
   Zap,
   Loader2,
-  Send
+  Send,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
 import CodeEditor from "@/components/CodeEditor";
 import { 
   generateAdaptiveQuestion, 
@@ -56,6 +60,8 @@ export const Interview = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   
+  const { user } = useAuth();
+  
   const [isInterviewStarted, setIsInterviewStarted] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -69,6 +75,9 @@ export const Interview = () => {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [speechError, setSpeechError] = useState<string | null>(null);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [gestureStatus, setGestureStatus] = useState<GestureAnalysisResult>({
     attention: 'good',
@@ -87,6 +96,7 @@ export const Interview = () => {
   
   const webcamRef = useRef<Webcam>(null);
   const gestureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
     const stored = sessionStorage.getItem('interviewConfig');
@@ -210,6 +220,100 @@ export const Interview = () => {
       });
     }
   };
+
+  const startSpeechRecognition = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      setSpeechError("Speech recognition not supported in this browser");
+      toast({
+        title: "Not Supported",
+        description: "Speech recognition is not supported in your browser. Please use Chrome or Edge.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setSpeechError(null);
+      toast({
+        title: "Listening",
+        description: "Speak your answer now...",
+      });
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript;
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+
+      const newTranscript = finalTranscript || interimTranscript;
+      setTranscript(newTranscript);
+      setCurrentResponse((prev) => prev + newTranscript);
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+      
+      let errorMessage = "An error occurred";
+      switch (event.error) {
+        case 'no-speech':
+          errorMessage = "No speech detected. Please try again.";
+          break;
+        case 'audio-capture':
+          errorMessage = "Microphone not available.";
+          break;
+        case 'not-allowed':
+          errorMessage = "Microphone permission denied.";
+          break;
+      }
+      
+      setSpeechError(errorMessage);
+      toast({
+        title: "Speech Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const stopSpeechRecognition = () => {
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.stop();
+      speechRecognitionRef.current = null;
+    }
+    setIsListening(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   const generateNextQuestion = async () => {
     if (!selectedRole) return;
@@ -339,7 +443,7 @@ export const Interview = () => {
     }
   };
 
-  const finishInterview = () => {
+  const finishInterview = async () => {
     const answeredCount = userResponses.filter(r => r.response && r.response.trim()).length;
     const totalQuestions = questions.length;
     
@@ -360,14 +464,30 @@ export const Interview = () => {
 
     const finalScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : totalScore;
 
-    sessionStorage.setItem('interviewResult', JSON.stringify({
+    const interviewResult = {
       totalQuestions,
       answeredQuestions: answeredCount,
       skippedQuestions: totalQuestions - answeredCount,
       overallScore: finalScore,
       responses: userResponses,
       role: selectedRole?.name
-    }));
+    };
+
+    sessionStorage.setItem('interviewResult', JSON.stringify(interviewResult));
+
+    if (user?.id) {
+      try {
+        await supabase.from('interviews').insert({
+          user_id: user.id,
+          position: selectedRole?.name || 'Interview',
+          score: finalScore,
+          status: 'completed',
+          created_at: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('Error saving interview:', error);
+      }
+    }
 
     toast({
       title: "Interview Completed",
@@ -665,13 +785,51 @@ export const Interview = () => {
                       )}
                       
                       <TabsContent value="response" className="mt-4 space-y-4">
-                        <Textarea
-                          placeholder="Type your answer here..."
-                          value={currentResponse}
-                          onChange={(e) => setCurrentResponse(e.target.value)}
-                          rows={6}
-                          disabled={showEvaluation}
-                        />
+                        <div className="relative">
+                          <Textarea
+                            placeholder="Type your answer here or use voice input..."
+                            value={currentResponse}
+                            onChange={(e) => setCurrentResponse(e.target.value)}
+                            rows={6}
+                            disabled={showEvaluation}
+                          />
+                          <div className="absolute bottom-3 right-3 flex gap-2">
+                            <Button
+                              type="button"
+                              variant={isListening ? "destructive" : "secondary"}
+                              size="sm"
+                              onClick={isListening ? stopSpeechRecognition : startSpeechRecognition}
+                              disabled={showEvaluation}
+                              className="h-8"
+                            >
+                              {isListening ? (
+                                <>
+                                  <VolumeX className="h-4 w-4 mr-1" />
+                                  Stop
+                                </>
+                              ) : (
+                                <>
+                                  <Volume2 className="h-4 w-4 mr-1" />
+                                  Voice
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                        
+                        {isListening && (
+                          <div className="flex items-center gap-2 p-2 bg-primary/10 rounded-lg animate-pulse">
+                            <Mic className="h-4 w-4 text-primary" />
+                            <span className="text-sm text-primary">Listening... Speak your answer</span>
+                          </div>
+                        )}
+                        
+                        {speechError && (
+                          <Alert variant="destructive">
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>{speechError}</AlertDescription>
+                          </Alert>
+                        )}
                         
                         {!showEvaluation ? (
                           <Button 

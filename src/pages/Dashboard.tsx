@@ -163,7 +163,7 @@ export const Dashboard = () => {
               <Camera className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">CareerMentor</h1>
+              <h1 className="text-xl font-bold">Talexis</h1>
               <p className="text-sm text-muted-foreground">AI Interview Platform</p>
             </div>
           </motion.div>

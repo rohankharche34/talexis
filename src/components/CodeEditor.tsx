@@ -10,15 +10,17 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 
 interface Language {
-  id: number;
+  id: string;
   name: string;
   extension: string;
   template: string;
+  language: string;
+  version: string;
 }
 
 const languages: Language[] = [
   {
-    id: 71,
+    id: "python",
     name: "Python",
     extension: "py",
     template: `# Python code
@@ -29,10 +31,12 @@ def solution():
 # Test your solution
 if __name__ == "__main__":
     result = solution()
-    print(result)`
+    print(result)`,
+    language: "python",
+    version: "3.10.0"
   },
   {
-    id: 63,
+    id: "javascript",
     name: "JavaScript",
     extension: "js", 
     template: `// JavaScript code
@@ -41,10 +45,12 @@ function solution() {
 }
 
 // Test your solution
-console.log(solution());`
+console.log(solution());`,
+    language: "javascript",
+    version: "18.15.0"
   },
   {
-    id: 54,
+    id: "cpp",
     name: "C++",
     extension: "cpp",
     template: `#include <iostream>
@@ -56,10 +62,12 @@ int main() {
     // Write your code here
     
     return 0;
-}`
+}`,
+    language: "c++",
+    version: "10.2.0"
   },
   {
-    id: 62,
+    id: "java",
     name: "Java",
     extension: "java",
     template: `public class Solution {
@@ -67,10 +75,12 @@ int main() {
         // Write your code here
         
     }
-}`
+}`,
+    language: "java",
+    version: "15.0.2"
   },
   {
-    id: 60,
+    id: "go",
     name: "Go",
     extension: "go",
     template: `package main
@@ -80,7 +90,9 @@ import "fmt"
 func main() {
     // Write your code here
     
-}`
+}`,
+    language: "go",
+    version: "1.16.2"
   }
 ];
 
@@ -97,17 +109,19 @@ export const CodeEditor = ({ question, onCodeChange }: CodeEditorProps) => {
   const [isRunning, setIsRunning] = useState(false);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [memory, setMemory] = useState<number | null>(null);
+  const [compileError, setCompileError] = useState<string | null>(null);
   const editorRef = useRef(null);
   const { toast } = useToast();
 
   const handleLanguageChange = (languageId: string) => {
-    const language = languages.find(lang => lang.id === parseInt(languageId));
+    const language = languages.find(lang => lang.id === languageId);
     if (language) {
       setSelectedLanguage(language);
       setCode(language.template);
       setOutput("");
       setExecutionTime(null);
       setMemory(null);
+      setCompileError(null);
     }
   };
 
@@ -131,66 +145,65 @@ export const CodeEditor = ({ question, onCodeChange }: CodeEditorProps) => {
     setOutput("");
     setExecutionTime(null);
     setMemory(null);
+    setCompileError(null);
 
     try {
-      // Create submission
-      const submissionResponse = await fetch("https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true", {
+      const startTime = Date.now();
+      
+      const response = await fetch("https://emkc.org/api/v2/piston/execute", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "X-RapidAPI-Key": process.env.RAPIDAPI_KEY || "",
-          "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com"
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          language_id: selectedLanguage.id,
-          source_code: code,
-          stdin: input,
-          expected_output: null
+          language: selectedLanguage.language,
+          version: selectedLanguage.version,
+          files: [{
+            content: code
+          }],
+          stdin: input
         })
       });
 
-      if (!submissionResponse.ok) {
-        throw new Error(`HTTP error! status: ${submissionResponse.status}`);
+      const endTime = Date.now();
+      setExecutionTime((endTime - startTime) / 1000);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await submissionResponse.json();
+      const result = await response.json();
       
-      if (result.status?.id === 3) {
-        // Successful execution
-        setOutput(result.stdout || "No output");
-        setExecutionTime(parseFloat(result.time) || 0);
-        setMemory(parseInt(result.memory) || 0);
-        
-        toast({
-          title: "Code Executed Successfully",
-          description: `Executed in ${result.time}s`
-        });
-      } else if (result.status?.id === 5) {
-        // Time limit exceeded
-        setOutput("Error: Time limit exceeded");
+      if (result.run) {
+        if (result.run.stderr) {
+          setOutput(result.run.stderr);
+          setCompileError("Runtime Error");
+          toast({
+            title: "Runtime Error",
+            description: "Check your code logic",
+            variant: "destructive"
+          });
+        } else if (result.run.output) {
+          setOutput(result.run.output);
+          toast({
+            title: "Code Executed Successfully",
+            description: `Executed in ${((endTime - startTime) / 1000).toFixed(2)}s`
+          });
+        } else {
+          setOutput("No output");
+          toast({
+            title: "Code Executed",
+            description: "Code ran successfully with no output"
+          });
+        }
+      } else if (result.message) {
+        setOutput(result.message);
+        setCompileError("Error");
         toast({
           title: "Execution Error",
-          description: "Time limit exceeded",
+          description: result.message,
           variant: "destructive"
         });
-      } else if (result.status?.id === 6) {
-        // Compile error
-        setOutput(result.compile_output || "Compilation error");
-        toast({
-          title: "Compilation Error",
-          description: "Check your code syntax",
-          variant: "destructive"
-        });
-      } else if (result.stderr) {
-        // Runtime error
-        setOutput(result.stderr);
-        toast({
-          title: "Runtime Error",
-          description: "Check your code logic",
-          variant: "destructive"
-        });
-      } else {
-        setOutput(result.stdout || "No output");
       }
     } catch (error) {
       console.error("Execution error:", error);
@@ -222,13 +235,13 @@ export const CodeEditor = ({ question, onCodeChange }: CodeEditorProps) => {
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <CardTitle className="text-lg">Code Editor</CardTitle>
           <div className="flex items-center space-x-4">
-            <Select value={selectedLanguage.id.toString()} onValueChange={handleLanguageChange}>
+            <Select value={selectedLanguage.id} onValueChange={handleLanguageChange}>
               <SelectTrigger className="w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {languages.map((lang) => (
-                  <SelectItem key={lang.id} value={lang.id.toString()}>
+                  <SelectItem key={lang.id} value={lang.id}>
                     {lang.name}
                   </SelectItem>
                 ))}
@@ -257,7 +270,7 @@ export const CodeEditor = ({ question, onCodeChange }: CodeEditorProps) => {
           <div className="border border-border rounded-lg overflow-hidden">
             <Editor
               height="400px"
-              language={selectedLanguage.name.toLowerCase()}
+              language={selectedLanguage.language === 'c++' ? 'cpp' : selectedLanguage.language}
               value={code}
               onChange={handleCodeChange}
               theme="vs-dark"
@@ -286,25 +299,18 @@ export const CodeEditor = ({ question, onCodeChange }: CodeEditorProps) => {
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">Output</label>
                 {executionTime !== null && (
-                  <div className="flex space-x-2">
-                    <Badge variant="secondary" className="text-xs">
-                      {executionTime}s
-                    </Badge>
-                    {memory !== null && (
-                      <Badge variant="secondary" className="text-xs">
-                        {memory} KB
-                      </Badge>
-                    )}
-                  </div>
+                  <Badge variant="secondary" className="text-xs">
+                    {executionTime.toFixed(2)}s
+                  </Badge>
                 )}
               </div>
-              <div className="border border-border rounded-lg p-3 min-h-[100px] bg-muted font-mono text-sm whitespace-pre-wrap">
+              <div className={`border border-border rounded-lg p-3 min-h-[100px] bg-muted font-mono text-sm whitespace-pre-wrap ${compileError ? 'text-destructive' : ''}`}>
                 {output || "Output will appear here..."}
               </div>
             </div>
           </div>
 
-          {output.includes("Error:") && (
+          {compileError && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>

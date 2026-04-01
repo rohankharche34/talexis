@@ -73,14 +73,17 @@ const Index = () => {
             <h1 className="text-5xl md:text-7xl font-bold mb-6 leading-tight">
               Master Your{" "}
               <span className="bg-gradient-to-r from-primary-glow to-accent bg-clip-text text-transparent">
-                AI Interview
+                Interview
               </span>{" "}
-              Skills
+              Skills with Talexis
             </h1>
             
-            <p className="text-xl md:text-2xl mb-8 opacity-90 leading-relaxed">
-              Practice with our advanced AI platform featuring real-time gesture analysis,
-              intelligent question generation, and comprehensive performance insights.
+            <p className="text-xl md:text-2xl mb-4 opacity-90 leading-relaxed">
+              AI-Powered Interview Practice Platform
+            </p>
+
+            <p className="text-lg md:text-xl mb-8 opacity-80 leading-relaxed">
+              Practice with real-time gesture analysis, intelligent question generation, and comprehensive performance insights.
             </p>
 
             <motion.div
@@ -217,7 +220,7 @@ const Index = () => {
       {/* Footer */}
       <footer className="border-t border-border py-8">
         <div className="container mx-auto px-6 text-center text-muted-foreground">
-          <p>&copy; 2024 AI Interview Platform. All rights reserved.</p>
+          <p>&copy; 2026 Talexis. All rights reserved.</p>
         </div>
       </footer>
     </div>

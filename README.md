@@ -1,6 +1,12 @@
 # Talexis
 
-An AI-powered interview practice platform that helps candidates prepare for technical interviews with real-time gesture analysis, code execution, and AI-generated feedback.
+Talexis is an AI-powered interview practice platform that helps candidates prepare for technical interviews with:
+
+- **Real-time gesture analysis** (attention, eye contact, posture)
+- **Integrated code editor** for solving coding problems
+- **AI-generated adaptive questions** and response evaluation
+- **ATS Resume Checker** for optimizing resumes for applicant tracking systems
+- **Pipeline Builder** for organizing interview prep workflows
 
 ## Features
 
@@ -11,6 +17,7 @@ An AI-powered interview practice platform that helps candidates prepare for tech
   - **Eye Contact**: Monitors face position to ensure you're looking at the camera
   - **Posture**: Analyzes face size to determine if you're too close or too far from camera
 - **Code Editor**: Integrated Monaco code editor for solving coding problems
+- **Voice Input**: Use speech-to-text to answer questions verbally
 - **Response Tracking**: Practice answering behavioral questions
 
 ### 2. ATS Resume Checker
@@ -19,7 +26,7 @@ An AI-powered interview practice platform that helps candidates prepare for tech
 - Match your skills with job requirements
 
 ### 3. Dashboard
-- View your interview history
+- View your interview history with scores
 - Track your progress over time
 - Access all features from a centralized location
 
@@ -38,20 +45,79 @@ An AI-powered interview practice platform that helps candidates prepare for tech
 - **Monaco Editor** - Code editor
 - **Recharts** - Data visualization
 - **React Router** - Client-side routing
+- **Framer Motion** - Animations
+- **TanStack Query** - Data fetching
 
-### Backend
-- **Python FastAPI** - Web framework
-- **OpenCV** - Computer vision for gesture analysis
-- **WebSocket** - Real-time communication
+### Backend (Vision Service)
+- **Python** - Programming language
+- **FastAPI** - Web framework
+- **OpenCV** - Computer vision
+- **WebSockets** - Real-time communication
+- **NumPy** - Numerical computing
 
-### Services
-- **Supabase** - Authentication and database
-- **Gemini AI** - AI-powered resume and interview analysis
+### Services & Integrations
+- **Supabase** - Authentication & Database
+- **Gemini AI** - LLM for question generation and evaluation
+- **Piston API** - Code execution engine
+- **Web Speech API** - Voice input for answers
+
+## Challenges Faced During Development
+
+1. **Speech-to-Text Integration**: Implementing voice input required careful handling of browser permissions and Web Speech API compatibility across different browsers.
+
+2. **Code Execution Security**: Running user-submitted code safely required integrating an external code execution service (Piston API) with proper error handling and timeout management.
+
+3. **Real-time Gesture Analysis**: Processing video frames in real-time for gesture analysis demanded optimization to maintain performance without blocking the main UI thread.
+
+4. **AI Question Generation**: Ensuring the Gemini API generates relevant, adaptive questions based on user responses required careful prompt engineering and fallback mechanisms.
+
+5. **Database Integration for Interview History**: Properly saving and retrieving interview results from Supabase to display history on the dashboard required consistent data schema and error handling.
+
+6. **Cross-Browser Compatibility**: Ensuring features like voice input, camera access, and code editor work consistently across Chrome, Firefox, and Safari.
+
+7. **Performance Optimization**: Balancing AI API calls, video processing, and code execution while maintaining a smooth user experience during interviews.
+
+8. **Responsive Design**: Creating a seamless experience across different screen sizes for the video interview interface, code editor, and dashboard.
+
+## Future Scope and Scalability
+
+### Feature Enhancements
+1. **Multi-language Support** - Expand voice input and AI evaluation to support multiple languages for global users
+2. **Mock Interview Sessions** - Add peer-to-peer mock interviews with real-time feedback
+3. **Industry-specific Question Banks** - Create specialized question sets for different industries (Finance, Healthcare, Tech)
+4. **Video Recording & Playback** - Allow users to review their interview recordings for self-improvement
+5. **AI Coach Assistant** - Implement a chat-based AI coach for real-time interview tips and guidance
+
+### Technical Scalability
+1. **Microservices Architecture** - Split backend into separate services (AI service, Vision service, User service)
+2. **Caching Layer** - Implement Redis for caching AI responses and reducing API costs
+3. **CDN Integration** - Use content delivery networks for faster media delivery globally
+4. **Database Optimization** - Add read replicas and implement database sharding for high traffic
+5. **WebSocket Scaling** - Implement WebSocket clustering for handling more concurrent interviews
+
+### Enterprise Features
+1. **Team Management** - Allow companies to create teams and manage candidate pipelines
+2. **Analytics Dashboard** - Provide detailed performance analytics for recruiters and hiring managers
+3. **Custom Branding** - White-label solution for enterprise clients
+4. **Integration APIs** - API endpoints for ATS integration (Greenhouse, Lever, Workday)
+5. **Interview Scheduling** - Calendar integration for scheduling live mock interviews
+
+### AI Improvements
+1. **Fine-tuned Models** - Train custom models for better domain-specific question generation
+2. **Sentiment Analysis** - Add emotional tone detection to evaluate confidence levels
+3. **Object Detection** - Expand gesture analysis to detect hand gestures and facial expressions
+4. **Auto-grading** - Automatic code grading with test case validation
+
+### Monetization Options
+1. **Freemium Model** - Basic features free, premium features paid
+2. **Subscription Plans** - Monthly/yearly plans for individuals and teams
+3. **Pay-per-interview** - Credit-based system for pay-as-you-go usage
+4. **Enterprise Licensing** - Custom pricing for large organizations
 
 ## Project Structure
 
 ```
-Career-mentor-Ai/
+talexis/
 ├── src/
 │   ├── components/
 │   │   ├── ui/              # Reusable UI components (shadcn/ui)
@@ -69,13 +135,17 @@ Career-mentor-Ai/
 │   │   └── PipelineBuilder.tsx # Interview pipeline builder
 │   ├── lib/
 │   │   ├── gestureAnalysis.ts # Client-side gesture analysis
-│   │   ├── aiService.ts     # AI service integration
+│   │   ├── aiService.ts     # AI service integration (Gemini)
 │   │   └── supabaseClient.ts # Supabase client
+│   ├── hooks/
+│   │   ├── useAuth.ts       # Authentication hook
+│   │   └── useUserStats.ts # User statistics hook
 │   └── main.tsx            # Application entry point
 ├── backend/
 │   └── vision_service/
 │       ├── app.py           # FastAPI vision service
-│       └── requirements.txt # Python dependencies
+│       ├── requirements.txt # Python dependencies
+│       └── README.md        # Vision service docs
 ├── package.json             # Node.js dependencies
 ├── tailwind.config.ts       # Tailwind configuration
 └── vite.config.ts          # Vite configuration
@@ -93,7 +163,7 @@ Career-mentor-Ai/
 
 ```bash
 git clone <repository-url>
-cd Career-mentor-Ai
+cd talexis
 ```
 
 ### 2. Frontend Setup
@@ -364,7 +434,7 @@ Follow the prompts:
 - Set up and deploy? Yes
 - Which scope? Your Vercel username
 - Link to existing project? No
-- Project name: career-mentor-ai
+- Project name: talexis
 - Directory? ./
 - Want to modify settings? No
 
